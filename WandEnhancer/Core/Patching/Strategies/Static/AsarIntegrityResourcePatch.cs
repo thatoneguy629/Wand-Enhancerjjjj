@@ -26,10 +26,28 @@ namespace WandEnhancer.Core.Patching.Strategies.Static
         /// <returns>True if rewritten, false if the resource is absent from this build (skip, not a failure).</returns>
         public static bool Patch(string exePath, string asarPath, Action<string, ELogType> log)
         {
-            string newHash = AsarHeaderHash.Compute(asarPath);
-            if (newHash.Length != HashHexLength)
+            return Rewrite(exePath, asarPath,
+                "[ENHANCER] Rewrote the ASAR integrity resource hash in Wand.exe to match the patched app.asar.", log);
+        }
+
+        /// <summary>
+        /// Re-syncs the resource to the restored pristine app.asar. Call after app.asar is restored and the fuse is
+        /// back on, or Electron rejects the original archive against the patched hash. Stateless, so it also repairs
+        /// installs patched before Restore undid this rewrite.
+        /// </summary>
+        /// <returns>True if in sync afterwards, false if the resource is absent from this build.</returns>
+        public static bool Restore(string exePath, string pristineAsarPath, Action<string, ELogType> log)
+        {
+            return Rewrite(exePath, pristineAsarPath,
+                "[ENHANCER] Restored the ASAR integrity resource hash in Wand.exe.", log);
+        }
+
+        private static bool Rewrite(string exePath, string asarPath, string doneMessage, Action<string, ELogType> log)
+        {
+            // Locate first: a build without the resource has nothing to sync, whatever app.asar holds.
+            if (!File.Exists(exePath))
             {
-                throw new Exception("Computed asar header hash is not 64 hex characters; cannot patch the integrity resource safely.");
+                return false;
             }
 
             byte[] anchor = Encoding.UTF8.GetBytes(AnchorPrefix);
@@ -37,6 +55,12 @@ namespace WandEnhancer.Core.Patching.Strategies.Static
             if (hashOffset < 0)
             {
                 return false;
+            }
+
+            string newHash = AsarHeaderHash.Compute(asarPath);
+            if (newHash.Length != HashHexLength)
+            {
+                throw new Exception("Computed asar header hash is not 64 hex characters; cannot patch the integrity resource safely.");
             }
 
             using (var stream = new FileStream(exePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
@@ -59,7 +83,7 @@ namespace WandEnhancer.Core.Patching.Strategies.Static
                 stream.Write(Encoding.ASCII.GetBytes(newHash), 0, HashHexLength);
             }
 
-            log?.Invoke("[ENHANCER] Rewrote the ASAR integrity resource hash in Wand.exe to match the patched app.asar.", ELogType.Info);
+            log?.Invoke(doneMessage, ELogType.Info);
             return true;
         }
 
